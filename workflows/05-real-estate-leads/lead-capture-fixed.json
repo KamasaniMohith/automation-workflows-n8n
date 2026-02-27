@@ -1,0 +1,361 @@
+{
+  "name": "Real Estate Lead Capture - Form Demo",
+  "nodes": [
+    {
+      "parameters": {
+        "formData": {
+          "title": "🏠 Narnaund Property Enquiry Demo",
+          "description": "AI-powered lead routing system - Live demo",
+          "formFields": [
+            {
+              "fieldType": "string",
+              "fieldLabel": "Full Name *",
+              "fieldId": "name",
+              "requiredField": true,
+              "placeholder": "Enter your full name"
+            },
+            {
+              "fieldType": "email",
+              "fieldLabel": "Email *",
+              "fieldId": "email",
+              "requiredField": true,
+              "placeholder": "your@email.com"
+            },
+            {
+              "fieldType": "phone",
+              "fieldLabel": "Phone *",
+              "fieldId": "phone",
+              "requiredField": true,
+              "placeholder": "+91 98765 43210"
+            },
+            {
+              "fieldType": "string",
+              "fieldLabel": "Property Requirements *",
+              "fieldId": "message",
+              "requiredField": true,
+              "fieldOptions": {
+                "rows": 4
+              },
+              "placeholder": "Location, budget, bedrooms, urgency..."
+            },
+            {
+              "fieldType": "hiddenField",
+              "fieldLabel": "Source",
+              "fieldId": "source",
+              "defaultValue": "demo-form"
+            }
+          ]
+        }
+      },
+      "id": "form-trigger-001",
+      "name": "Property Enquiry Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email.toLowerCase().trim() }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "source",
+              "value": "={{ $json.source || 'demo-form' }}"
+            },
+            {
+              "name": "received_at",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "name": "lead_id",
+              "value": "={{ 'LEAD-' + $now.toFormat('yyyyMMdd-HHmm') + '-' + Math.floor(Math.random() * 10000) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalize-001",
+      "name": "Normalize Lead Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// AI Lead Analysis (mock for demo)\nconst lead = $input.first().json;\n\n// Extract insights from message\nconst message = lead.message.toLowerCase();\nconst analysis = {\n  lead_type: message.includes('rent') ? 'renting' : message.includes('sell') ? 'selling' : 'buying',\n  property_type: message.includes('office') || message.includes('shop') ? 'commercial' : 'residential',\n  location: message.includes('narnaund') ? 'Narnaund' : message.includes('hisar') ? 'Hisar' : 'Local',\n  budget: message.includes('lakh') || message.includes('l') ? message.match(/\\d+[\\s]?l(?:akh)?/i)?.[0] || 'not_specified' : 'not_specified',\n  urgency: message.includes('urgent') || message.includes('asap') ? 'high' : message.includes('soon') ? 'medium' : 'low',\n  quality_score: Math.floor(Math.random() * 30) + 70,\n  confidence: Math.floor(Math.random() * 30) + 70\n};\n\nreturn {\n  json: {\n    ...lead,\n    ...analysis,\n    ai_analysis_timestamp: new Date().toISOString(),\n    status: analysis.confidence < 75 ? 'manual_review' : 'auto_processed'\n  }\n};"
+      },
+      "id": "ai-analysis-001",
+      "name": "AI Lead Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 75,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "confidence-check-001",
+      "name": "Low Confidence Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.received_at }}",
+            "Lead ID": "={{ $json.lead_id }}",
+            "Name": "={{ $json.name }}",
+            "Email": "={{ $json.email }}",
+            "Phone": "={{ $json.phone }}",
+            "Message": "={{ $json.message }}",
+            "Lead Type": "={{ $json.lead_type }}",
+            "Property Type": "={{ $json.property_type }}",
+            "Location": "={{ $json.location }}",
+            "Budget": "={{ $json.budget }}",
+            "Urgency": "={{ $json.urgency }}",
+            "Quality Score": "={{ $json.quality_score }}",
+            "Confidence": "={{ $json.confidence }}",
+            "Status": "={{ $json.status }}",
+            "Source": "={{ $json.source }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-manual-001",
+      "name": "Save Manual Review",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1050, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Smart agent routing\nconst lead = $input.first().json;\n\nconst agents = [\n  { name: 'Local Narnaund Broker', email: 'narnaund@broker.com', territory: 'Narnaund' },\n  { name: 'Hisar Specialist', email: 'hisar@expert.com', territory: 'Hisar' },\n  { name: 'Residential Expert', email: 'residential@agency.com', territory: 'Residential' }\n];\n\nlet agent = agents[0];\nif (lead.location === 'Narnaund') {\n  agent = agents.find(a => a.territory === 'Narnaund') || agents[0];\n} else if (lead.property_type === 'commercial') {\n  agent = agents[2];\n}\n\nreturn {\n  json: {\n    ...lead,\n    assigned_agent: agent.name,\n    assigned_agent_email: agent.email,\n    routing_reason: `${lead.property_type} in ${lead.location}, Urgency: ${lead.urgency}`,\n    assignment_timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "routing-logic-001",
+      "name": "Route to Agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.received_at }}",
+            "Lead ID": "={{ $json.lead_id }}",
+            "Name": "={{ $json.name }}",
+            "Email": "={{ $json.email }}",
+            "Phone": "={{ $json.phone }}",
+            "Message": "={{ $json.message }}",
+            "Lead Type": "={{ $json.lead_type }}",
+            "Property Type": "={{ $json.property_type }}",
+            "Location": "={{ $json.location }}",
+            "Budget": "={{ $json.budget }}",
+            "Urgency": "={{ $json.urgency }}",
+            "Quality Score": "={{ $json.quality_score }}",
+            "Assigned Agent": "={{ $json.assigned_agent }}",
+            "Status": "assigned",
+            "Source": "={{ $json.source }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-save-001",
+      "name": "Save to CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pageType": "formEnding",
+        "title": "✅ Lead Captured Successfully!",
+        "message": "Your property enquiry has been routed to our specialist agent.<br><strong>Lead ID:</strong> {{ $json.lead_id }}<br><strong>Routed to:</strong> {{ $json.assigned_agent }}<br><br>We will contact you within 24 hours.",
+        "options": {
+          "showFormData": true
+        }
+      },
+      "id": "success-ending-001",
+      "name": "Success Page",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "pageType": "formEnding",
+        "title": "✅ Enquiry Received",
+        "message": "Thank you! Your lead (ID: {{ $json.lead_id }}) has been queued for manual review by our team.<br>We will contact you soon.",
+        "options": {
+          "showFormData": true
+        }
+      },
+      "id": "manual-ending-001",
+      "name": "Manual Review Page",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    }
+  ],
+  "connections": {
+    "Property Enquiry Form": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead Data": {
+      "main": [
+        [
+          {
+            "node": "AI Lead Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Lead Analysis": {
+      "main": [
+        [
+          {
+            "node": "Low Confidence Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Low Confidence Check": {
+      "main": [
+        [
+          {
+            "node": "Save Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route to Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Manual Review": {
+      "main": [
+        [
+          {
+            "node": "Manual Review Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route to Agent": {
+      "main": [
+        [
+          {
+            "node": "Save to CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to CRM": {
+      "main": [
+        [
+          {
+            "node": "Success Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-01-08T13:00:00.000Z",
+  "versionId": "1"
+}
