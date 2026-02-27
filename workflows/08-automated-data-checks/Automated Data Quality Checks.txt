@@ -1,0 +1,159 @@
+{
+  "name": "Automated Data Quality Checks",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule_trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv",
+        "options": {}
+      },
+      "id": "fetch_data",
+      "name": "Fetch CSV Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse CSV data\nconst csvData = $input.first().json.data;\nconst rows = csvData.split('\\n');\nconst headers = rows[0].split(',');\nconst data = [];\n\nfor (let i = 1; i < rows.length; i++) {\n  if (rows[i].trim()) {\n    const values = rows[i].split(',');\n    const obj = {};\n    headers.forEach((header, index) => {\n      obj[header.trim()] = values[index] ? values[index].trim() : null;\n    });\n    data.push(obj);\n  }\n}\n\nreturn data.map(row => ({ json: row }));"
+      },
+      "id": "parse_csv",
+      "name": "Parse CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items.map(item => item.json);\n\n// Get column names\nconst columns = Object.keys(data[0]);\nconst totalRows = data.length;\n\n// Check for missing values\nconst missingValues = {};\ncolumns.forEach(col => {\n  const missing = data.filter(row => !row[col] || row[col] === '' || row[col] === 'null').length;\n  missingValues[col] = {\n    count: missing,\n    percentage: ((missing / totalRows) * 100).toFixed(2)\n  };\n});\n\n// Check for duplicates\nconst stringifiedRows = data.map(row => JSON.stringify(row));\nconst uniqueRows = new Set(stringifiedRows);\nconst duplicateCount = totalRows - uniqueRows.size;\n\n// Find duplicate row examples\nconst rowCounts = {};\nconst duplicateExamples = [];\nstringifiedRows.forEach((row, index) => {\n  rowCounts[row] = (rowCounts[row] || 0) + 1;\n  if (rowCounts[row] === 2) {\n    duplicateExamples.push(data[index]);\n  }\n});\n\n// Check for anomalies in numeric columns\nconst anomalies = {};\ncolumns.forEach(col => {\n  const numericValues = data\n    .map(row => parseFloat(row[col]))\n    .filter(val => !isNaN(val));\n  \n  if (numericValues.length > 0) {\n    const mean = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;\n    const stdDev = Math.sqrt(\n      numericValues.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / numericValues.length\n    );\n    \n    const outliers = data.filter(row => {\n      const val = parseFloat(row[col]);\n      return !isNaN(val) && Math.abs(val - mean) > 3 * stdDev;\n    });\n    \n    if (outliers.length > 0) {\n      anomalies[col] = {\n        mean: mean.toFixed(2),\n        stdDev: stdDev.toFixed(2),\n        outlierCount: outliers.length,\n        examples: outliers.slice(0, 3)\n      };\n    }\n  }\n});\n\n// Compile quality report\nconst qualityReport = {\n  timestamp: new Date().toISOString(),\n  totalRows: totalRows,\n  totalColumns: columns.length,\n  missingValues: missingValues,\n  duplicates: {\n    count: duplicateCount,\n    percentage: ((duplicateCount / totalRows) * 100).toFixed(2),\n    examples: duplicateExamples.slice(0, 3)\n  },\n  anomalies: anomalies,\n  dataQualityScore: calculateQualityScore(missingValues, duplicateCount, totalRows, anomalies)\n};\n\nfunction calculateQualityScore(missing, duplicates, total, anomalies) {\n  let score = 100;\n  \n  // Deduct for missing values\n  const avgMissing = Object.values(missing).reduce((sum, val) => sum + parseFloat(val.percentage), 0) / Object.keys(missing).length;\n  score -= avgMissing * 0.5;\n  \n  // Deduct for duplicates\n  score -= (duplicates / total) * 100 * 0.3;\n  \n  // Deduct for anomalies\n  score -= Object.keys(anomalies).length * 2;\n  \n  return Math.max(0, score).toFixed(2);\n}\n\nreturn [{ json: qualityReport }];"
+      },
+      "id": "quality_checks",
+      "name": "Run Quality Checks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.dataQualityScore }}",
+              "operation": "smaller",
+              "value2": 80
+            }
+          ]
+        }
+      },
+      "id": "check_score",
+      "name": "Quality Score < 80?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.site/your-webhook-url-here",
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify($json) }}"
+      },
+      "id": "send_alert",
+      "name": "Send Alert (Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $input.first().json;\n\nconst summary = `\n📊 DATA QUALITY REPORT\n======================\nTimestamp: ${report.timestamp}\nQuality Score: ${report.dataQualityScore}/100\n\nDataset Overview:\n- Total Rows: ${report.totalRows}\n- Total Columns: ${report.totalColumns}\n\n⚠️ Missing Values:\n${Object.entries(report.missingValues)\n  .filter(([_, val]) => val.count > 0)\n  .map(([col, val]) => `  - ${col}: ${val.count} (${val.percentage}%)`)\n  .join('\\n') || '  None detected'}\n\n🔄 Duplicates:\n- Count: ${report.duplicates.count} (${report.duplicates.percentage}%)\n\n🎯 Anomalies:\n${Object.entries(report.anomalies)\n  .map(([col, val]) => `  - ${col}: ${val.outlierCount} outliers detected`)\n  .join('\\n') || '  None detected'}\n\n${report.dataQualityScore < 80 ? '⚠️ ACTION REQUIRED: Data quality below threshold!' : '✅ Data quality is acceptable'}\n`;\n\nreturn [{ json: { summary, fullReport: report } }];"
+      },
+      "id": "format_report",
+      "name": "Format Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch CSV Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch CSV Data": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV": {
+      "main": [
+        [
+          {
+            "node": "Run Quality Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Quality Checks": {
+      "main": [
+        [
+          {
+            "node": "Quality Score < 80?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Score < 80?": {
+      "main": [
+        [
+          {
+            "node": "Send Alert (Webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
