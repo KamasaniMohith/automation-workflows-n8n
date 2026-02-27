@@ -23,14 +23,8 @@
 4. Add your credentials & activate!
 
 ## 🙋 About Me
-Built by [Your Name] — Connect with me on 
-[LinkedIn](your-linkedin-url)
-```
+Built by Mohith Kamasani  — Connect with me on 
+LinkedIn:www.linkedin.com/in/kamasani-mohith-reddy-1b1239352
 
----
 
-### **Step 6 — Get Your Link & Post on LinkedIn**
 
-Your repo link will be:
-```
-https://github.com/YOUR-USERNAME/n8n-automations
