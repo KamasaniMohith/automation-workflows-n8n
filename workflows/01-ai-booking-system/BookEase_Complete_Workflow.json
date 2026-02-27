@@ -1,0 +1,412 @@
+{
+  "name": "BookEase - Smart Appointment Scheduler",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Form Responses 1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "name": "Watch for New Form Submissions",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 2,
+      "position": [
+        250,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets - BookEase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Configuration - UPDATE THESE VALUES\nconst config = {\n  CALENDAR_ID: \"YOUR_CALENDAR_ID@group.calendar.google.com\",\n  YOUR_EMAIL: \"your@email.com\",\n  BOOKINGS_SHEET_ID: \"YOUR_BOOKINGS_LOG_SHEET_ID\",\n  BUSINESS_NAME: \"BookEase Appointments\",\n  BUSINESS_PHONE: \"+91-9876543210\"\n};\n\n// Extract form data\nconst formData = $json;\n\nreturn [{\n  json: {\n    config,\n    booking: {\n      timestamp: new Date().toISOString(),\n      name: formData['Full Name'] || formData.Name,\n      email: formData['Email Address'] || formData.Email,\n      phone: formData['Phone Number'] || formData.Phone,\n      service: formData['Select Service'] || formData.Service,\n      preferredDate: formData['Preferred Appointment Date'] || formData.Date,\n      preferredTime: formData['Preferred Time Slot'] || formData.Time,\n      notes: formData['Any special requirements or notes?'] || formData.Notes || ''\n    }\n  }\n}];"
+      },
+      "name": "Config & Parse Form Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        470,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { booking } = $json;\n\n// Parse the date and time\nconst dateStr = booking.preferredDate;\nconst timeStr = booking.preferredTime;\n\n// Extract time range (e.g., \"9:00 AM - 10:00 AM\")\nconst timeMatch = timeStr.match(/(\\d{1,2}:\\d{2}\\s*(?:AM|PM))/);\nif (!timeMatch) {\n  throw new Error('Invalid time format');\n}\n\nconst startTimeStr = timeMatch[1];\n\n// Parse date\nconst dateParts = dateStr.split('/');\nlet appointmentDate;\n\nif (dateParts.length === 3) {\n  // Format: MM/DD/YYYY or DD/MM/YYYY\n  const month = parseInt(dateParts[0]) - 1; // JS months are 0-indexed\n  const day = parseInt(dateParts[1]);\n  const year = parseInt(dateParts[2]);\n  appointmentDate = new Date(year, month, day);\n} else {\n  // Try ISO format\n  appointmentDate = new Date(dateStr);\n}\n\n// Parse time\nconst [time, period] = startTimeStr.split(/\\s+/);\nconst [hours, minutes] = time.split(':').map(Number);\n\nlet hour24 = hours;\nif (period === 'PM' && hours !== 12) hour24 += 12;\nif (period === 'AM' && hours === 12) hour24 = 0;\n\nappointmentDate.setHours(hour24, minutes, 0, 0);\n\n// Calculate end time based on service\nconst serviceDurations = {\n  'Consultation (30 min)': 30,\n  'Full Session (60 min)': 60,\n  'Follow-up (15 min)': 15,\n  'Workshop (90 min)': 90\n};\n\nconst duration = serviceDurations[booking.service] || 60;\nconst endDate = new Date(appointmentDate.getTime() + duration * 60000);\n\nreturn [{\n  json: {\n    ...$json,\n    appointment: {\n      startDateTime: appointmentDate.toISOString(),\n      endDateTime: endDate.toISOString(),\n      duration,\n      dateFormatted: appointmentDate.toLocaleDateString('en-IN', { \n        weekday: 'long', \n        year: 'numeric', \n        month: 'long', \n        day: 'numeric' \n      }),\n      timeFormatted: appointmentDate.toLocaleTimeString('en-IN', { \n        hour: '2-digit', \n        minute: '2-digit',\n        hour12: True\n      })\n    }\n  }\n}];"
+      },
+      "name": "Parse Date & Time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        690,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAllEvents",
+        "calendarId": {
+          "__rl": true,
+          "value": "={{$json.config.CALENDAR_ID}}",
+          "mode": "id"
+        },
+        "returnAll": false,
+        "limit": 50,
+        "options": {
+          "timeMin": "={{$json.appointment.startDateTime}}",
+          "timeMax": "={{$json.appointment.endDateTime}}"
+        }
+      },
+      "name": "Check Calendar Availability",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        910,
+        300
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "2",
+          "name": "Google Calendar - BookEase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$input.all().length}}",
+              "operation": "equal",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Is Slot Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1130,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendarId": {
+          "__rl": true,
+          "value": "={{$node['Config & Parse Form Data'].json.config.CALENDAR_ID}}",
+          "mode": "id"
+        },
+        "start": "={{$node['Parse Date & Time'].json.appointment.startDateTime}}",
+        "end": "={{$node['Parse Date & Time'].json.appointment.endDateTime}}",
+        "summary": "={{$node['Config & Parse Form Data'].json.booking.service}} - {{$node['Config & Parse Form Data'].json.booking.name}}",
+        "description": "=Client: {{$node['Config & Parse Form Data'].json.booking.name}}\\nEmail: {{$node['Config & Parse Form Data'].json.booking.email}}\\nPhone: {{$node['Config & Parse Form Data'].json.booking.phone}}\\nService: {{$node['Config & Parse Form Data'].json.booking.service}}\\n\\nNotes: {{$node['Config & Parse Form Data'].json.booking.notes}}",
+        "additionalFields": {
+          "sendUpdates": "all"
+        }
+      },
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        1350,
+        200
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "2",
+          "name": "Google Calendar - BookEase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$node['Config & Parse Form Data'].json.config.BOOKINGS_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{$node['Config & Parse Form Data'].json.booking.timestamp}}",
+            "Name": "={{$node['Config & Parse Form Data'].json.booking.name}}",
+            "Email": "={{$node['Config & Parse Form Data'].json.booking.email}}",
+            "Phone": "={{$node['Config & Parse Form Data'].json.booking.phone}}",
+            "Service": "={{$node['Config & Parse Form Data'].json.booking.service}}",
+            "Date": "={{$node['Parse Date & Time'].json.appointment.dateFormatted}}",
+            "Time": "={{$node['Parse Date & Time'].json.appointment.timeFormatted}}",
+            "Status": "Confirmed",
+            "Calendar Event ID": "={{$json.id}}",
+            "Notes": "={{$node['Config & Parse Form Data'].json.booking.notes}}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log to Booking Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1570,
+        200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets - BookEase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$node['Config & Parse Form Data'].json.booking.email}}",
+        "subject": "=Appointment Confirmed - {{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }\n    .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }\n    .booking-details { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #667eea; }\n    .detail-row { margin: 10px 0; }\n    .label { font-weight: bold; color: #667eea; }\n    .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }\n    .footer { text-align: center; color: #999; font-size: 12px; margin-top: 30px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>✅ Appointment Confirmed!</h1>\n    </div>\n    <div class=\"content\">\n      <p>Hi {{$node['Config & Parse Form Data'].json.booking.name}},</p>\n      \n      <p>Great news! Your appointment has been confirmed. Here are the details:</p>\n      \n      <div class=\"booking-details\">\n        <div class=\"detail-row\">\n          <span class=\"label\">📅 Date:</span> {{$node['Parse Date & Time'].json.appointment.dateFormatted}}\n        </div>\n        <div class=\"detail-row\">\n          <span class=\"label\">🕐 Time:</span> {{$node['Parse Date & Time'].json.appointment.timeFormatted}}\n        </div>\n        <div class=\"detail-row\">\n          <span class=\"label\">💼 Service:</span> {{$node['Config & Parse Form Data'].json.booking.service}}\n        </div>\n        <div class=\"detail-row\">\n          <span class=\"label\">⏱️ Duration:</span> {{$node['Parse Date & Time'].json.appointment.duration}} minutes\n        </div>\n      </div>\n      \n      <p><strong>What happens next?</strong></p>\n      <ul>\n        <li>You'll receive a reminder 24 hours before your appointment</li>\n        <li>This appointment has been added to your calendar</li>\n        <li>If you need to reschedule, please contact us as soon as possible</li>\n      </ul>\n      \n      <p>If you have any questions, feel free to reach out:</p>\n      <p>📧 Email: {{$node['Config & Parse Form Data'].json.config.YOUR_EMAIL}}<br>\n      📱 Phone: {{$node['Config & Parse Form Data'].json.config.BUSINESS_PHONE}}</p>\n      \n      <p>We look forward to seeing you!</p>\n      \n      <p>Best regards,<br>\n      <strong>{{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}</strong></p>\n    </div>\n    <div class=\"footer\">\n      <p>This is an automated confirmation from {{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "Send Confirmation Email to Client",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1790,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3",
+          "name": "Gmail - BookEase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$node['Config & Parse Form Data'].json.config.YOUR_EMAIL}}",
+        "subject": "=🔔 New Booking: {{$node['Config & Parse Form Data'].json.booking.name}}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .alert { background: #4CAF50; color: white; padding: 20px; border-radius: 8px; text-align: center; }\n    .details { background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .row { margin: 10px 0; }\n    .label { font-weight: bold; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"alert\">\n      <h2>🎉 New Appointment Booked!</h2>\n    </div>\n    <div class=\"details\">\n      <div class=\"row\"><span class=\"label\">Client:</span> {{$node['Config & Parse Form Data'].json.booking.name}}</div>\n      <div class=\"row\"><span class=\"label\">Email:</span> {{$node['Config & Parse Form Data'].json.booking.email}}</div>\n      <div class=\"row\"><span class=\"label\">Phone:</span> {{$node['Config & Parse Form Data'].json.booking.phone}}</div>\n      <div class=\"row\"><span class=\"label\">Service:</span> {{$node['Config & Parse Form Data'].json.booking.service}}</div>\n      <div class=\"row\"><span class=\"label\">Date:</span> {{$node['Parse Date & Time'].json.appointment.dateFormatted}}</div>\n      <div class=\"row\"><span class=\"label\">Time:</span> {{$node['Parse Date & Time'].json.appointment.timeFormatted}}</div>\n      <div class=\"row\"><span class=\"label\">Notes:</span> {{$node['Config & Parse Form Data'].json.booking.notes}}</div>\n    </div>\n    <p>Check your calendar for full details.</p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "Notify You (Business Owner)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2010,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3",
+          "name": "Gmail - BookEase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 24,
+        "unit": "hours"
+      },
+      "name": "Wait 24 Hours",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2230,
+        200
+      ],
+      "webhookId": "booking-reminder"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$node['Config & Parse Form Data'].json.booking.email}}",
+        "subject": "=Reminder: Appointment Tomorrow - {{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }\n    .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }\n    .reminder-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .detail-row { margin: 10px 0; }\n    .label { font-weight: bold; color: #f5576c; }\n    .footer { text-align: center; color: #999; font-size: 12px; margin-top: 30px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>⏰ Appointment Reminder</h1>\n    </div>\n    <div class=\"content\">\n      <p>Hi {{$node['Config & Parse Form Data'].json.booking.name}},</p>\n      \n      <div class=\"reminder-box\">\n        <h3>🔔 Your appointment is tomorrow!</h3>\n        <p>This is a friendly reminder about your upcoming appointment.</p>\n      </div>\n      \n      <div class=\"detail-row\">\n        <span class=\"label\">📅 Date:</span> {{$node['Parse Date & Time'].json.appointment.dateFormatted}}\n      </div>\n      <div class=\"detail-row\">\n        <span class=\"label\">🕐 Time:</span> {{$node['Parse Date & Time'].json.appointment.timeFormatted}}\n      </div>\n      <div class=\"detail-row\">\n        <span class=\"label\">💼 Service:</span> {{$node['Config & Parse Form Data'].json.booking.service}}\n      </div>\n      <div class=\"detail-row\">\n        <span class=\"label\">⏱️ Duration:</span> {{$node['Parse Date & Time'].json.appointment.duration}} minutes\n      </div>\n      \n      <p><strong>Please arrive 5 minutes early.</strong></p>\n      \n      <p>If you need to cancel or reschedule, please contact us immediately:</p>\n      <p>📧 {{$node['Config & Parse Form Data'].json.config.YOUR_EMAIL}}<br>\n      📱 {{$node['Config & Parse Form Data'].json.config.BUSINESS_PHONE}}</p>\n      \n      <p>Looking forward to seeing you!</p>\n      \n      <p>Best regards,<br>\n      <strong>{{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}</strong></p>\n    </div>\n    <div class=\"footer\">\n      <p>Automated reminder from {{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "Send 24h Reminder Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2450,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3",
+          "name": "Gmail - BookEase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$node['Config & Parse Form Data'].json.booking.email}}",
+        "subject": "=Slot Unavailable - {{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }\n    .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }\n    .warning-box { background: #fee; border-left: 4px solid #f5576c; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .footer { text-align: center; color: #999; font-size: 12px; margin-top: 30px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>❌ Slot Not Available</h1>\n    </div>\n    <div class=\"content\">\n      <p>Hi {{$node['Config & Parse Form Data'].json.booking.name}},</p>\n      \n      <div class=\"warning-box\">\n        <h3>⚠️ Sorry, this time slot is already booked</h3>\n        <p>The appointment slot you requested is no longer available.</p>\n        <p><strong>Requested:</strong> {{$node['Parse Date & Time'].json.appointment.dateFormatted}} at {{$node['Parse Date & Time'].json.appointment.timeFormatted}}</p>\n      </div>\n      \n      <p><strong>What to do next:</strong></p>\n      <ul>\n        <li>Please submit a new booking request with a different time slot</li>\n        <li>Contact us directly to check available slots</li>\n        <li>We'll do our best to accommodate your schedule</li>\n      </ul>\n      \n      <p>Contact us:</p>\n      <p>📧 Email: {{$node['Config & Parse Form Data'].json.config.YOUR_EMAIL}}<br>\n      📱 Phone: {{$node['Config & Parse Form Data'].json.config.BUSINESS_PHONE}}</p>\n      \n      <p>We apologize for any inconvenience!</p>\n      \n      <p>Best regards,<br>\n      <strong>{{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}</strong></p>\n    </div>\n    <div class=\"footer\">\n      <p>Automated notification from {{$node['Config & Parse Form Data'].json.config.BUSINESS_NAME}}</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "Send Slot Unavailable Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1350,
+        400
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3",
+          "name": "Gmail - BookEase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Watch for New Form Submissions": {
+      "main": [
+        [
+          {
+            "node": "Config & Parse Form Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config & Parse Form Data": {
+      "main": [
+        [
+          {
+            "node": "Parse Date & Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Date & Time": {
+      "main": [
+        [
+          {
+            "node": "Check Calendar Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Calendar Availability": {
+      "main": [
+        [
+          {
+            "node": "Is Slot Available?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Slot Available?": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Slot Unavailable Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Log to Booking Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Booking Sheet": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email to Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation Email to Client": {
+      "main": [
+        [
+          {
+            "node": "Notify You (Business Owner)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify You (Business Owner)": {
+      "main": [
+        [
+          {
+            "node": "Wait 24 Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 24 Hours": {
+      "main": [
+        [
+          {
+            "node": "Send 24h Reminder Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-10T04:07:00.000Z",
+  "versionId": "1"
+}
