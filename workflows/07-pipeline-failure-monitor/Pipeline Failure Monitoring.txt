@@ -1,0 +1,533 @@
+{
+  "name": "Pipeline Failure Monitoring System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "schedule_monitor",
+      "name": "Schedule Monitor",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "pipeline_name",
+              "value": "Daily Sales ETL"
+            },
+            {
+              "name": "expected_runtime_mins",
+              "value": "10"
+            },
+            {
+              "name": "status",
+              "value": "={{ Math.random() > 0.7 ? 'FAILED' : 'SUCCESS' }}"
+            },
+            {
+              "name": "actual_runtime_mins",
+              "value": "={{ Math.floor(Math.random() * 45) + 5 }}"
+            },
+            {
+              "name": "error_message",
+              "value": "={{ $json.status === 'FAILED' ? 'Connection timeout to source database' : 'N/A' }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "pipeline1_status",
+      "name": "Pipeline 1 - Sales ETL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        460,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "pipeline_name",
+              "value": "Hourly User Activity"
+            },
+            {
+              "name": "expected_runtime_mins",
+              "value": "5"
+            },
+            {
+              "name": "status",
+              "value": "={{ Math.random() > 0.85 ? 'FAILED' : 'SUCCESS' }}"
+            },
+            {
+              "name": "actual_runtime_mins",
+              "value": "={{ Math.floor(Math.random() * 30) + 3 }}"
+            },
+            {
+              "name": "error_message",
+              "value": "={{ $json.status === 'FAILED' ? 'API rate limit exceeded' : 'N/A' }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "pipeline2_status",
+      "name": "Pipeline 2 - User Activity",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "pipeline_name",
+              "value": "Nightly Data Warehouse Sync"
+            },
+            {
+              "name": "expected_runtime_mins",
+              "value": "20"
+            },
+            {
+              "name": "status",
+              "value": "SUCCESS"
+            },
+            {
+              "name": "actual_runtime_mins",
+              "value": "={{ Math.floor(Math.random() * 15) + 18 }}"
+            },
+            {
+              "name": "error_message",
+              "value": "N/A"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "pipeline3_status",
+      "name": "Pipeline 3 - Warehouse Sync",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        460,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "check_failure",
+      "name": "Check if Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition2",
+              "leftValue": "={{ parseInt($json.actual_runtime_mins) }}",
+              "rightValue": "={{ parseInt($json.expected_runtime_mins) * 2 }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "check_sla_breach",
+      "name": "Check SLA Breach",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "list",
+        "list": {
+          "__rl": true,
+          "value": "user",
+          "mode": "list",
+          "cachedResultName": "My First Channel"
+        },
+        "text": "=🚨 **PIPELINE FAILURE ALERT** 🚨\n\n**Pipeline:** {{ $json.pipeline_name }}\n**Status:** {{ $json.status }}\n**Error:** {{ $json.error_message }}\n**Timestamp:** {{ $json.timestamp }}\n**Runtime:** {{ $json.actual_runtime_mins }} mins\n\n⚠️ Immediate investigation required!",
+        "otherOptions": {}
+      },
+      "id": "slack_failure_alert",
+      "name": "Slack - Failure Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        200
+      ],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "SLACK_CREDENTIALS_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "list",
+        "list": {
+          "__rl": true,
+          "value": "user",
+          "mode": "list",
+          "cachedResultName": "My First Channel"
+        },
+        "text": "=⚠️ **SLA BREACH WARNING** ⚠️\n\n**Pipeline:** {{ $json.pipeline_name }}\n**Expected Runtime:** {{ $json.expected_runtime_mins }} mins\n**Actual Runtime:** {{ $json.actual_runtime_mins }} mins\n**Timestamp:** {{ $json.timestamp }}\n\n⏱️ Pipeline is running slower than expected!",
+        "otherOptions": {}
+      },
+      "id": "slack_sla_alert",
+      "name": "Slack - SLA Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        400
+      ],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "SLACK_CREDENTIALS_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "your-email@gmail.com",
+        "toEmail": "your-email@gmail.com",
+        "subject": "=🚨 Pipeline Failure: {{ $json.pipeline_name }}",
+        "message": "=<h2>Pipeline Failure Alert</h2>\n<p><strong>Pipeline Name:</strong> {{ $json.pipeline_name }}</p>\n<p><strong>Status:</strong> {{ $json.status }}</p>\n<p><strong>Error Message:</strong> {{ $json.error_message }}</p>\n<p><strong>Timestamp:</strong> {{ $json.timestamp }}</p>\n<p><strong>Actual Runtime:</strong> {{ $json.actual_runtime_mins }} minutes</p>\n<hr>\n<p>Please investigate immediately.</p>",
+        "options": {}
+      },
+      "id": "email_failure_alert",
+      "name": "Email - Failure Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIALS_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Pipeline Error Logs"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "pipeline_name": "={{ $json.pipeline_name }}",
+            "status": "={{ $json.status }}",
+            "error_message": "={{ $json.error_message }}",
+            "expected_runtime": "={{ $json.expected_runtime_mins }}",
+            "actual_runtime": "={{ $json.actual_runtime_mins }}",
+            "severity": "={{ $json.status === 'FAILED' ? 'CRITICAL' : 'WARNING' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "pipeline_name",
+              "displayName": "pipeline_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "expected_runtime",
+              "displayName": "expected_runtime",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "actual_runtime",
+              "displayName": "actual_runtime",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log_to_sheets",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIALS_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Monitor": {
+      "main": [
+        [
+          {
+            "node": "Pipeline 1 - Sales ETL",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Pipeline 2 - User Activity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Pipeline 3 - Warehouse Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pipeline 1 - Sales ETL": {
+      "main": [
+        [
+          {
+            "node": "Check if Failed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check SLA Breach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pipeline 2 - User Activity": {
+      "main": [
+        [
+          {
+            "node": "Check if Failed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check SLA Breach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pipeline 3 - Warehouse Sync": {
+      "main": [
+        [
+          {
+            "node": "Check if Failed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check SLA Breach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Failed": {
+      "main": [
+        [
+          {
+            "node": "Slack - Failure Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email - Failure Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check SLA Breach": {
+      "main": [
+        [
+          {
+            "node": "Slack - SLA Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - Failure Alert": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - SLA Alert": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Failure Alert": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-12-17T12:00:00.000Z",
+  "versionId": "1"
+}
