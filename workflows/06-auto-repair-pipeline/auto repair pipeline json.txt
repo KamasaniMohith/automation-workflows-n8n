@@ -1,0 +1,428 @@
+{
+  "name": "Weather Data Auto-Repair Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule: Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.openweathermap.org/data/2.5/weather?q=London&appid=YOUR_OPENWEATHER_API_KEY&units=metric",
+        "options": {}
+      },
+      "id": "fetch-weather",
+      "name": "Fetch Weather Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "raw_weather",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "city": "={{ $json.name }}",
+            "temperature": "={{ $json.main.temp }}",
+            "humidity": "={{ $json.main.humidity }}",
+            "weather_description": "={{ $json.weather[0].description }}",
+            "api_response": "={{ JSON.stringify($json) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "insert-raw",
+      "name": "Insert Raw Data",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "temp-null-check",
+              "leftValue": "={{ $json.main.temp }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isEmpty"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "check-quality",
+      "name": "Check: Temperature NULL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "table": "cleaned_weather",
+        "limit": 1,
+        "sort": {
+          "values": [
+            {
+              "column": "timestamp",
+              "direction": "desc"
+            }
+          ]
+        }
+      },
+      "id": "get-last-temp",
+      "name": "Get Last Known Temperature",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        200
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Auto-repair logic\nconst weatherData = $input.first().json;\nconst lastTemp = $('Get Last Known Temperature').first().json.temperature || 15;\n\nlet repaired = false;\nlet repairNotes = [];\n\n// Repair 1: Fill null temperature\nlet temperature = weatherData.main.temp;\nif (!temperature || temperature === null) {\n  temperature = lastTemp;\n  repaired = true;\n  repairNotes.push('Filled null temperature with last known value');\n}\n\n// Repair 2: Cap humidity at 100%\nlet humidity = weatherData.main.humidity;\nif (humidity > 100) {\n  humidity = 100;\n  repaired = true;\n  repairNotes.push('Capped humidity at 100%');\n}\n\n// Repair 3: Handle negative humidity\nif (humidity < 0) {\n  humidity = 0;\n  repaired = true;\n  repairNotes.push('Set negative humidity to 0');\n}\n\nreturn {\n  city: weatherData.name,\n  temperature: temperature,\n  humidity: humidity,\n  weather_description: weatherData.weather[0].description,\n  was_repaired: repaired,\n  repair_notes: repairNotes.join('; ') || null\n};"
+      },
+      "id": "auto-repair",
+      "name": "Auto-Repair Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "cleaned_weather",
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        }
+      },
+      "id": "insert-cleaned",
+      "name": "Insert Cleaned Data",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        400
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "table": "cleaned_weather",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "column": "timestamp",
+              "operator": "gte",
+              "value": "={{ $now.minus({hours: 24}).toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "reconcile-count",
+      "name": "Reconciliation Check",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        400
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if we have expected number of rows (24 in last 24 hours)\nconst rows = $input.all();\nconst actualRows = rows.length;\nconst expectedRows = 24; // 1 per hour\nconst discrepancy = Math.abs(expectedRows - actualRows);\n\nreturn {\n  expected_rows: expectedRows,\n  actual_rows: actualRows,\n  discrepancy: discrepancy,\n  status: discrepancy === 0 ? 'pass' : 'fail'\n};"
+      },
+      "id": "calc-reconcile",
+      "name": "Calculate Discrepancy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "fail",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "check-alert",
+      "name": "Should Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "YOUR_DISCORD_WEBHOOK_URL",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=🚨 **Pipeline Alert**\n\n**Issue**: Reconciliation failed\n**Expected rows**: {{ $json.expected_rows }}\n**Actual rows**: {{ $json.actual_rows }}\n**Discrepancy**: {{ $json.discrepancy }}\n\n⚠️ Manual investigation required."
+            }
+          ]
+        }
+      },
+      "id": "send-alert",
+      "name": "Send Discord Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "pipeline_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $('Should Alert?').item.json.status === 'pass' ? 'success' : 'partial_success' }}",
+            "issues_detected": "={{ JSON.stringify($('Auto-Repair Data').item.json.repair_notes) }}",
+            "repairs_applied": "={{ $('Auto-Repair Data').item.json.was_repaired }}",
+            "rows_processed": 1,
+            "alert_sent": "={{ $('Should Alert?').item.json.status === 'fail' }}"
+          }
+        }
+      },
+      "id": "log-run",
+      "name": "Log Pipeline Run",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        500
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule: Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Fetch Weather Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weather Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Raw Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Raw Data": {
+      "main": [
+        [
+          {
+            "node": "Check: Temperature NULL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check: Temperature NULL?": {
+      "main": [
+        [
+          {
+            "node": "Get Last Known Temperature",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auto-Repair Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Last Known Temperature": {
+      "main": [
+        [
+          {
+            "node": "Auto-Repair Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Repair Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Cleaned Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Cleaned Data": {
+      "main": [
+        [
+          {
+            "node": "Reconciliation Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliation Check": {
+      "main": [
+        [
+          {
+            "node": "Calculate Discrepancy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Discrepancy": {
+      "main": [
+        [
+          {
+            "node": "Should Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Alert?": {
+      "main": [
+        [
+          {
+            "node": "Send Discord Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Pipeline Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Pipeline Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
