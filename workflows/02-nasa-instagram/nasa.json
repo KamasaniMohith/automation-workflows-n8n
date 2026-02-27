@@ -1,0 +1,161 @@
+{
+  "name": "NASA Daily Space Image to Instagram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "days", "daysInterval": 1 }]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [120, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.nasa.gov/planetary/apod",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "api_key", "value": "YOUR_NASA_API_KEY" }]
+        }
+      },
+      "name": "Fetch NASA APOD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.media_type }}", "value2": "image" }]
+        }
+      },
+      "name": "Filter Media Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.cloudinary.com/v1_1/YOUR_CLOUD_NAME/image/upload",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "file", "value": "={{ $binary.data }}" },
+            { "name": "upload_preset", "value": "YOUR_UPLOAD_PRESET" }
+          ]
+        }
+      },
+      "name": "Upload to Cloudinary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "key", "value": "YOUR_GEMINI_API_KEY" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "contents",
+              "value": "=[{\"parts\":[{\"text\":\"Write an engaging Instagram caption for this NASA space image titled: {{ $('Fetch NASA APOD').item.json.title }}. Description: {{ $('Fetch NASA APOD').item.json.explanation }}. Include relevant hashtags.\"}]}]"
+            }
+          ]
+        }
+      },
+      "name": "Generate AI Caption",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const caption = $input.item.json.candidates[0].content.parts[0].text;\nreturn [{ json: { caption: caption.substring(0, 2200), imageUrl: $('Upload to Cloudinary').item.json.secure_url } }];"
+      },
+      "name": "Format Caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/YOUR_IG_USER_ID/media",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "image_url", "value": "={{ $json.imageUrl }}" },
+            { "name": "caption", "value": "={{ $json.caption }}" },
+            { "name": "access_token", "value": "YOUR_INSTAGRAM_ACCESS_TOKEN" }
+          ]
+        }
+      },
+      "name": "Create Instagram Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/YOUR_IG_USER_ID/media_publish",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "creation_id", "value": "={{ $json.id }}" },
+            { "name": "access_token", "value": "YOUR_INSTAGRAM_ACCESS_TOKEN" }
+          ]
+        }
+      },
+      "name": "Publish to Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "YOUR_GOOGLE_SHEET_ID" },
+        "sheetName": "Sheet1",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $now.toISO() }}",
+            "Title": "={{ $('Fetch NASA APOD').item.json.title }}",
+            "Instagram Post ID": "={{ $json.id }}",
+            "Image URL": "={{ $('Format Caption').item.json.imageUrl }}"
+          }
+        }
+      },
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1920, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Fetch NASA APOD", "type": "main", "index": 0 }]] },
+    "Fetch NASA APOD": { "main": [[{ "node": "Filter Media Type", "type": "main", "index": 0 }]] },
+    "Filter Media Type": { "main": [[{ "node": "Download Image", "type": "main", "index": 0 }]] },
+    "Download Image": { "main": [[{ "node": "Upload to Cloudinary", "type": "main", "index": 0 }]] },
+    "Upload to Cloudinary": { "main": [[{ "node": "Generate AI Caption", "type": "main", "index": 0 }]] },
+    "Generate AI Caption": { "main": [[{ "node": "Format Caption", "type": "main", "index": 0 }]] },
+    "Format Caption": { "main": [[{ "node": "Create Instagram Container", "type": "main", "index": 0 }]] },
+    "Create Instagram Container": { "main": [[{ "node": "Publish to Instagram", "type": "main", "index": 0 }]] },
+    "Publish to Instagram": { "main": [[{ "node": "Log to Google Sheets", "type": "main", "index": 0 }]] }
+  }
+}
