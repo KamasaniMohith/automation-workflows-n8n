@@ -1,0 +1,112 @@
+{
+  "name": "BBC News → Google Sheets → Twitter",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 6 }]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [120, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://feeds.bbci.co.uk/news/rss.xml"
+      },
+      "name": "RSS Read",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "title", "value": "={{ $json.title }}", "type": "string" },
+            { "name": "link", "value": "={{ $json.link }}", "type": "string" },
+            { "name": "pubDate", "value": "={{ $json.pubDate }}", "type": "string" },
+            { "name": "guid", "value": "={{ $json.guid }}", "type": "string" }
+          ]
+        }
+      },
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "value": "YOUR_GOOGLE_SHEET_ID" },
+        "sheetName": "Sheet1",
+        "options": {}
+      },
+      "name": "Get row(s) in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [520, 480]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const newItems = $input.all().filter(item => {\n  const existingGuids = item.json.existingGuids || [];\n  return !existingGuids.includes(item.json.guid);\n});\nreturn newItems.map(item => ({ json: item.json }));"
+      },
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.title }} {{ $json.link }} #BBCNews #BreakingNews",
+        "additionalFields": {}
+      },
+      "name": "Create Tweet",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "YOUR_GOOGLE_SHEET_ID" },
+        "sheetName": "Sheet1",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "guid": "={{ $json.guid }}",
+            "title": "={{ $json.title }}",
+            "link": "={{ $json.link }}",
+            "postedAt": "={{ $now.toISO() }}"
+          }
+        }
+      },
+      "name": "Append row in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1320, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "RSS Read", "type": "main", "index": 0 }]] },
+    "RSS Read": { "main": [[{ "node": "Edit Fields", "type": "main", "index": 0 }, { "node": "Get row(s) in sheet", "type": "main", "index": 0 }]] },
+    "Edit Fields": { "main": [[{ "node": "Merge", "type": "main", "index": 0 }]] },
+    "Get row(s) in sheet": { "main": [[{ "node": "Merge", "type": "main", "index": 1 }]] },
+    "Merge": { "main": [[{ "node": "Code in JavaScript", "type": "main", "index": 0 }]] },
+    "Code in JavaScript": { "main": [[{ "node": "Create Tweet", "type": "main", "index": 0 }]] },
+    "Create Tweet": { "main": [[{ "node": "Append row in sheet", "type": "main", "index": 0 }]] }
+  }
+}
